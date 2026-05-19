@@ -31,7 +31,8 @@ const load = (key, def) => { try { const v = localStorage.getItem(key); return v
 const save = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const DEFAULT_SETTINGS = { profit: 5, ownerPay: 50, tax: 25, opex: 20, scriptUrl: '' };
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz2GD5B0suvtpqPYsPKl_AxRFiqmWjIY-p3pfQzwT8aJwTszAxvunYJ5WNkgsjisCLH/exec';
+const DEFAULT_SETTINGS = { profit: 5, ownerPay: 50, tax: 25, opex: 20, scriptUrl: SCRIPT_URL };
 
 const QB_CATEGORIES = [
   'Vehicle & Travel',
@@ -229,9 +230,9 @@ function Allocate({ settings, onSave }) {
     const date = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     const record = { ...calc, date, id: Date.now() };
     setSyncStatus('syncing');
-    if (settings.scriptUrl) {
-      const r1 = await syncToSheets(settings.scriptUrl, 'Allocations', [date, calc.income, calc.ownerPay, calc.tax, calc.profit, calc.opex]);
-      await syncToSheets(settings.scriptUrl, 'AccountBalances', [date, 'Allocation', calc.ownerPay, calc.tax, calc.profit, calc.opex]);
+    if (SCRIPT_URL) {
+      const r1 = await syncToSheets(SCRIPT_URL, 'Allocations', [date, calc.income, calc.ownerPay, calc.tax, calc.profit, calc.opex]);
+      await syncToSheets(SCRIPT_URL, 'AccountBalances', [date, 'Allocation', calc.ownerPay, calc.tax, calc.profit, calc.opex]);
       setSyncStatus(r1.ok ? 'synced' : 'error');
     } else {
       setSyncStatus(null);
@@ -343,8 +344,8 @@ function Expenses({ expenses, settings, onSave }) {
     if (!form.amount || !form.description) return;
     const record = { ...form, amount: parseFloat(form.amount), id: Date.now() };
     setSyncStatus('syncing');
-    if (settings.scriptUrl) {
-      const res = await syncToSheets(settings.scriptUrl, 'Expenses', [
+    if (SCRIPT_URL) {
+      const res = await syncToSheets(SCRIPT_URL, 'Expenses', [
         form.date, parseFloat(form.amount), form.description, form.category, form.account, form.photo ? 'Photo attached' : ''
       ]);
       setSyncStatus(res.ok ? 'synced' : 'error');
@@ -730,10 +731,8 @@ function App() {
 
   // Load data from Google Sheets on startup so all devices stay in sync
   useEffect(() => {
-    const s = load('pf_settings', DEFAULT_SETTINGS);
-    if (!s.scriptUrl) return;
     setSyncing(true);
-    fetch(`${s.scriptUrl}?action=getData`)
+    fetch(`${SCRIPT_URL}?action=getData`)
       .then(r => r.json())
       .then(data => {
         if (data.allocations && data.allocations.length > 0) {

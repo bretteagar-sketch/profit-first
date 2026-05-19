@@ -426,10 +426,13 @@ function Expenses({ expenses, settings, onSave }) {
 }
 
 // ── Reports ───────────────────────────────────────────────────────────────────
-function Reports({ allocations, expenses }) {
+function Reports({ allocations, expenses, onDeleteAllocation, onDeleteExpense }) {
   const now = new Date();
+  const [view, setView] = useState('summary'); // 'summary' | 'history'
   const [month, setMonth] = useState(now.getMonth());
   const [year, setYear] = useState(now.getFullYear());
+  const [confirmDelete, setConfirmDelete] = useState(null); // {type, id}
+  const [historyTab, setHistoryTab] = useState('allocations'); // 'allocations' | 'expenses'
 
   const inMonth = arr => arr.filter(x => {
     const d = new Date(x.date);
@@ -454,8 +457,135 @@ function Reports({ allocations, expenses }) {
 
   const years = [2024, 2025, 2026, 2027, 2028];
 
+  const handleDelete = (type, id) => {
+    if (type === 'allocation') onDeleteAllocation(id);
+    if (type === 'expense') onDeleteExpense(id);
+    setConfirmDelete(null);
+  };
+
+  // ── Toggle bar
+  const Toggle = () => (
+    <div style={{ display: 'flex', background: '#111827', borderRadius: 10, padding: 3, marginBottom: 14 }}>
+      {['summary', 'history'].map(v => (
+        <button key={v} onClick={() => setView(v)}
+          style={{ flex: 1, background: view === v ? '#3b82f6' : 'transparent', border: 'none', borderRadius: 8, padding: '8px 0', fontSize: 12, fontWeight: 700, color: view === v ? '#fff' : '#6b7280', cursor: 'pointer', transition: 'all 0.2s', textTransform: 'capitalize' }}>
+          {v === 'summary' ? '📊 Summary' : '📋 History'}
+        </button>
+      ))}
+    </div>
+  );
+
+  // ── Confirm delete modal
+  const ConfirmModal = () => confirmDelete ? (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div style={{ background: '#0d1626', borderRadius: 16, padding: 24, border: '1px solid rgba(239,68,68,0.3)', width: '100%', maxWidth: 340 }}>
+        <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Delete this entry?</div>
+        <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 20 }}>This will remove it from the app. You'll need to manually delete it from Google Sheets if it was synced.</div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={() => setConfirmDelete(null)}
+            style={{ flex: 1, background: '#1f2937', border: 'none', borderRadius: 10, padding: '11px 0', fontSize: 13, fontWeight: 700, color: '#e2e8f0', cursor: 'pointer' }}>
+            Cancel
+          </button>
+          <button onClick={() => handleDelete(confirmDelete.type, confirmDelete.id)}
+            style={{ flex: 1, background: '#ef4444', border: 'none', borderRadius: 10, padding: '11px 0', fontSize: 13, fontWeight: 700, color: '#fff', cursor: 'pointer' }}>
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
+  // ── History view
+  if (view === 'history') return (
+    <div style={{ padding: 16, animation: 'fadeIn 0.3s ease' }}>
+      <ConfirmModal />
+      <Toggle />
+
+      {/* History sub tabs */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+        {['allocations', 'expenses'].map(t => (
+          <button key={t} onClick={() => setHistoryTab(t)}
+            style={{ flex: 1, background: historyTab === t ? 'rgba(59,130,246,0.15)' : '#111827', border: `1px solid ${historyTab === t ? 'rgba(59,130,246,0.4)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 9, padding: '9px 0', fontSize: 12, fontWeight: 700, color: historyTab === t ? '#3b82f6' : '#6b7280', cursor: 'pointer', textTransform: 'capitalize' }}>
+            {t === 'allocations' ? '💸 Allocations' : '📋 Expenses'}
+          </button>
+        ))}
+      </div>
+
+      {/* Allocations history */}
+      {historyTab === 'allocations' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {[...allocations].reverse().length === 0
+            ? <Card><div style={{ fontSize: 13, color: '#6b7280', textAlign: 'center', padding: '16px 0' }}>No allocations yet</div></Card>
+            : [...allocations].reverse().map(a => (
+              <Card key={a.id}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 700 }}>${a.income.toFixed(2)} income</div>
+                    <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>{a.date}</div>
+                  </div>
+                  <button onClick={() => setConfirmDelete({ type: 'allocation', id: a.id })}
+                    style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 8, padding: '5px 10px', fontSize: 11, color: '#ef4444', cursor: 'pointer', fontWeight: 700 }}>
+                    Delete
+                  </button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                  {[
+                    { label: "Owner's Pay", amount: a.ownerPay, color: '#3b82f6' },
+                    { label: 'Tax',         amount: a.tax,      color: '#f59e0b' },
+                    { label: 'Profit',      amount: a.profit,   color: '#22c55e' },
+                    { label: 'OpEx',        amount: a.opex,     color: '#8b5cf6' },
+                  ].map(item => (
+                    <div key={item.label} style={{ background: '#111827', borderRadius: 8, padding: '8px 10px' }}>
+                      <div style={{ fontSize: 10, color: item.color, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>{item.label}</div>
+                      <div style={{ fontSize: 15, fontWeight: 700, marginTop: 2 }}>${item.amount.toFixed(2)}</div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            ))
+          }
+        </div>
+      )}
+
+      {/* Expenses history */}
+      {historyTab === 'expenses' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {[...expenses].reverse().length === 0
+            ? <Card><div style={{ fontSize: 13, color: '#6b7280', textAlign: 'center', padding: '16px 0' }}>No expenses yet</div></Card>
+            : [...expenses].reverse().map(e => (
+              <Card key={e.id}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                  <div style={{ flex: 1, paddingRight: 8 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700 }}>{e.description}</div>
+                    <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>{e.date}</div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 15, fontWeight: 700, color: '#ef4444' }}>−${e.amount.toFixed(2)}</span>
+                    <button onClick={() => setConfirmDelete({ type: 'expense', id: e.id })}
+                      style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 8, padding: '5px 10px', fontSize: 11, color: '#ef4444', cursor: 'pointer', fontWeight: 700 }}>
+                      Delete
+                    </button>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {[e.category, e.account].map(tag => (
+                    <span key={tag} style={{ fontSize: 10, color: '#60a5fa', background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 20, padding: '2px 8px' }}>{tag}</span>
+                  ))}
+                </div>
+                {e.photo && <img src={e.photo} alt="receipt" style={{ marginTop: 8, width: '100%', borderRadius: 7, maxHeight: 100, objectFit: 'cover' }} />}
+              </Card>
+            ))
+          }
+        </div>
+      )}
+    </div>
+  );
+
+  // ── Summary view
   return (
     <div style={{ padding: 16, animation: 'fadeIn 0.3s ease' }}>
+      <ConfirmModal />
+      <Toggle />
 
       {/* Month/Year picker */}
       <Card style={{ marginBottom: 14 }}>
@@ -596,9 +726,11 @@ function App() {
   const [allocations, setAllocations] = useState(() => load('pf_allocations', []));
   const [expenses, setExpenses] = useState(() => load('pf_expenses', []));
 
-  const saveSettings   = s => { setSettings(s);                             save('pf_settings',   s); };
-  const saveAllocation = a => { const n = [...allocations, a]; setAllocations(n); save('pf_allocations', n); };
-  const saveExpense    = e => { const n = [...expenses, e];    setExpenses(n);    save('pf_expenses',    n); };
+  const saveSettings      = s => { setSettings(s); save('pf_settings', s); };
+  const saveAllocation    = a => { const n = [...allocations, a]; setAllocations(n); save('pf_allocations', n); };
+  const saveExpense       = e => { const n = [...expenses, e];    setExpenses(n);    save('pf_expenses',    n); };
+  const deleteAllocation  = id => { const n = allocations.filter(a => a.id !== id); setAllocations(n); save('pf_allocations', n); };
+  const deleteExpense     = id => { const n = expenses.filter(e => e.id !== id);    setExpenses(n);    save('pf_expenses',    n); };
 
   const { title, sub } = TAB_TITLES[tab];
 
@@ -610,7 +742,7 @@ function App() {
         {tab === 'dashboard' && <Dashboard allocations={allocations} settings={settings} />}
         {tab === 'allocate'  && <Allocate  settings={settings} onSave={saveAllocation} />}
         {tab === 'expenses'  && <Expenses  expenses={expenses}  settings={settings} onSave={saveExpense} />}
-        {tab === 'reports'   && <Reports   allocations={allocations} expenses={expenses} />}
+        {tab === 'reports'   && <Reports   allocations={allocations} expenses={expenses} onDeleteAllocation={deleteAllocation} onDeleteExpense={deleteExpense} />}
         {tab === 'settings'  && <Settings  settings={settings} onSave={saveSettings} />}
       </div>
 

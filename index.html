@@ -225,8 +225,11 @@ function Allocate({ settings, onSave }) {
   };
 
   const allChecked = calc && previewItems.every(i => checked[i.key]);
+  const [submitting, setSubmitting] = useState(false);
 
   const finish = async () => {
+    if (submitting) return;
+    setSubmitting(true);
     const date = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     const record = { ...calc, date, id: Date.now() };
     setSyncStatus('syncing');
@@ -238,6 +241,7 @@ function Allocate({ settings, onSave }) {
       setSyncStatus(null);
     }
     onSave(record);
+    setSubmitting(false);
     setStep('done');
   };
 
@@ -282,8 +286,8 @@ function Allocate({ settings, onSave }) {
         </Card>
       ))}
       <div style={{ marginTop: 8 }}>
-        <Btn onClick={finish} disabled={!allChecked} color='#22c55e'>
-          {allChecked ? '✓ Log Allocation' : `${previewItems.filter(i => checked[i.key]).length} of ${previewItems.length} transferred`}
+        <Btn onClick={finish} disabled={!allChecked || submitting} color='#22c55e'>
+          {submitting ? '⏳ Saving...' : allChecked ? '✓ Log Allocation' : `${previewItems.filter(i => checked[i.key]).length} of ${previewItems.length} transferred`}
         </Btn>
       </div>
       <div style={{ marginTop: 8 }}>

@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <meta name="theme-color" content="#060d1a"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <title>Desert Bloom — Profit First</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet"/>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{background:#060d1a;font-family:'DM Sans','Segoe UI',sans-serif;color:#e2e8f0;}
+    #root{min-height:100vh;}
+    ::-webkit-scrollbar{width:4px;}
+    ::-webkit-scrollbar-track{background:#0d1626;}
+    ::-webkit-scrollbar-thumb{background:#3b82f6;border-radius:4px;}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState, useEffect, useRef} = React;
+
+// ── Storage ───────────────────────────────────────────────────────────────────
+const load = (key, def) => { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : def; } catch { return def; } };
+const save = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} };
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+const DEFAULT_SETTINGS = { profit: 5, ownerPay: 50, tax: 25, opex: 20, scriptUrl: '' };
+
+const QB_CATEGORIES = [
+  'Vehicle & Travel',
+  'Supplies & Materials',
+  'Equipment',
+  'Insurance',
+  'Phone & Internet',
+  'Subcontractors',
+  'Other'
+];
+
+const ACCOUNTS = ["Owner's Pay", 'Tax', 'Profit', 'OpEx'];
+
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+// ── Google Sheets Sync ────────────────────────────────────────────────────────
+async function syncToSheets(scriptUrl, sheet, rowData) {
+  if (!scriptUrl) return { ok: false };
+  try {
+    await fetch(scriptUrl, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sheet, row: rowData })
+    });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// ── Shared UI Components ──────────────────────────────────────────────────────
+function Card({ children, style = {} }) {
+  return (
+    <div style={{ background: '#0d1626', borderRadius: 14, padding: '14px 16px', border: '1px solid rgba(255,255,255,0.06)', ...style }}>
+      {children}
+    </div>
+  );
+}
+
+function Header({ title, sub }) {
+  return (
+    <div style={{ background: '#0a1628', borderBottom: '1px solid rgba(59,130,246,0.15)', padding: '13px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
+      <span style={{ fontSize: 22 }}>🌸</span>
+      <div>
+        <div style={{ fontWeight: 700, fontSize: 16, lineHeight: 1.2 }}>{title}</div>
+        {sub && <div style={{ fontSize: 10, color: '#6b7280' }}>{sub}</div>}
+      </div>
+    </div>
+  );
+}
+
+function Input({ label, value, onChange, type = 'text', placeholder = '' }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      {label && <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4, letterSpacing: 1, textTransform: 'uppercase' }}>{label}</div>}
+      <input
+        type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+        style={{ width: '100%', background: '#111827', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 9, padding: '10px 13px', fontSize: 13, color: '#e2e8f0', outline: 'none', boxSizing: 'border-box' }}
+      />
+    </div>
+  );
+}
+
+function SelectField({ label, value, onChange, options }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      {label && <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4, letterSpacing: 1, textTransform: 'uppercase' }}>{label}</div>}
+      <select
+        value={value} onChange={e => onChange(e.target.value)}
+        style={{ width: '100%', background: '#111827', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 9, padding: '10px 13px', fontSize: 13, color: '#e2e8f0', outline: 'none', boxSizing: 'border-box' }}
+      >
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+    </div>
+  );
+}
+
+function Btn({ children, onClick, color = '#3b82f6', disabled = false, style = {} }) {
+  return (
+    <button
+      onClick={onClick} disabled={disabled}
+      style={{ background: disabled ? '#1f2937' : color, color: disabled ? '#6b7280' : '#fff', border: 'none', borderRadius: 10, padding: '11px 18px', fontSize: 13, fontWeight: 700, cursor: disabled ? 'not-allowed' : 'pointer', width: '100%', transition: 'opacity 0.2s', ...style }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function SyncBadge({ status }) {
+  if (status === 'syncing') return <span style={{ fontSize: 10, color: '#60a5fa', background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 20, padding: '2px 8px' }}>⏳ Syncing...</span>;
+  if (status === 'synced')  return <span style={{ fontSize: 10, color: '#22c55e', background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)', borderRadius: 20, padding: '2px 8px' }}>✓ Synced</span>;
+  if (status === 'error')   return <span style={{ fontSize: 10, color: '#ef4444', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 20, padding: '2px 8px' }}>⚠ Sync Failed</span>;
+  return null;
+}
+
+function SectionLabel({ text }) {
+  return <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 10, letterSpacing: 1, textTransform: 'uppercase', fontWeight: 700 }}>{text}</div>;
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+function Dashboard({ allocations, settings }) {
+  const totalProfit = allocations.reduce((s, a) => s + (a.profit || 0), 0);
+  const recent = [...allocations].reverse().slice(0, 6);
+
+  const splitItems = [
+    { label: "Owner's Pay", pct: settings.ownerPay, color: '#3b82f6' },
+    { label: 'Tax',         pct: settings.tax,      color: '#f59e0b' },
+    { label: 'Profit',      pct: settings.profit,   color: '#22c55e' },
+    { label: 'OpEx',        pct: settings.opex,     color: '#8b5cf6' },
+  ];
+
+  return (
+    <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 14, animation: 'fadeIn 0.3s ease' }}>
+
+      {/* Total Profit Saved */}
+      <Card style={{ textAlign: 'center', padding: '24px 16px', background: 'linear-gradient(135deg, #0d1f3c 0%, #0d1626 100%)' }}>
+        <div style={{ fontSize: 11, color: '#6b7280', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6 }}>Total Profit Saved</div>
+        <div style={{ fontSize: 42, fontWeight: 700, color: '#22c55e' }}>${totalProfit.toFixed(2)}</div>
+        <div style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>All time</div>
+      </Card>
+
+      {/* Current Split */}
+      <Card>
+        <SectionLabel text="Your Current Split" />
+        {splitItems.map(item => (
+          <div key={item.label} style={{ marginBottom: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+              <span style={{ fontSize: 12 }}>{item.label}</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: item.color }}>{item.pct}%</span>
+            </div>
+            <div style={{ background: '#1f2937', borderRadius: 99, height: 5 }}>
+              <div style={{ width: `${item.pct}%`, height: '100%', borderRadius: 99, background: item.color }} />
+            </div>
+          </div>
+        ))}
+      </Card>
+
+      {/* Recent Allocations */}
+      <Card>
+        <SectionLabel text="Recent Allocations" />
+        {recent.length === 0 ? (
+          <div style={{ fontSize: 13, color: '#6b7280', textAlign: 'center', padding: '16px 0' }}>No allocations yet — tap Allocate to get started</div>
+        ) : recent.map((a, i) => (
+          <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: i < recent.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none' }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>${a.income.toFixed(2)} income</div>
+              <div style={{ fontSize: 11, color: '#6b7280' }}>{a.date}</div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 13, color: '#22c55e', fontWeight: 700 }}>+${a.profit.toFixed(2)} profit</div>
+              <div style={{ fontSize: 11, color: '#3b82f6' }}>${a.ownerPay.toFixed(2)} pay</div>
+            </div>
+          </div>
+        ))}
+      </Card>
+
+    </div>
+  );
+}
+
+// ── Allocate ──────────────────────────────────────────────────────────────────
+function Allocate({ settings, onSave }) {
+  const [income, setIncome] = useState('');
+  const [step, setStep] = useState('input');
+  const [checked, setChecked] = useState({});
+  const [syncStatus, setSyncStatus] = useState(null);
+  const [calc, setCalc] = useState(null);
+
+  const amt = parseFloat(income) || 0;
+
+  const previewItems = [
+    { key: 'ownerPay', label: "Owner's Pay", pct: settings.ownerPay, color: '#3b82f6' },
+    { key: 'tax',      label: 'Tax',          pct: settings.tax,      color: '#f59e0b' },
+    { key: 'profit',   label: 'Profit',       pct: settings.profit,   color: '#22c55e' },
+    { key: 'opex',     label: 'OpEx',         pct: settings.opex,     color: '#8b5cf6' },
+  ];
+
+  const calculate = () => {
+    if (!amt || amt <= 0) return;
+    setCalc({
+      income: amt,
+      ownerPay: amt * settings.ownerPay / 100,
+      tax:      amt * settings.tax      / 100,
+      profit:   amt * settings.profit   / 100,
+      opex:     amt * settings.opex     / 100,
+    });
+    setChecked({});
+    setStep('checklist');
+  };
+
+  const allChecked = calc && previewItems.every(i => checked[i.key]);
+
+  const finish = async () => {
+    const date = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const record = { ...calc, date, id: Date.now() };
+    setSyncStatus('syncing');
+    if (settings.scriptUrl) {
+      const r1 = await syncToSheets(settings.scriptUrl, 'Allocations', [date, calc.income, calc.ownerPay, calc.tax, calc.profit, calc.opex]);
+      await syncToSheets(settings.scriptUrl, 'AccountBalances', [date, 'Allocation', calc.ownerPay, calc.tax, calc.profit, calc.opex]);
+      setSyncStatus(r1.ok ? 'synced' : 'error');
+    } else {
+      setSyncStatus(null);
+    }
+    onSave(record);
+    setStep('done');
+  };
+
+  const reset = () => { setStep('input'); setIncome(''); setCalc(null); setSyncStatus(null); setChecked({}); };
+
+  // ── Done screen
+  if (step === 'done') return (
+    <div style={{ padding: 16, animation: 'fadeIn 0.3s ease' }}>
+      <Card style={{ textAlign: 'center', padding: '36px 16px' }}>
+        <div style={{ fontSize: 50, marginBottom: 14 }}>✅</div>
+        <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>Allocation Complete!</div>
+        <div style={{ fontSize: 14, color: '#6b7280', marginBottom: 4 }}>Income logged: <strong style={{ color: '#e2e8f0' }}>${calc.income.toFixed(2)}</strong></div>
+        <div style={{ fontSize: 14, color: '#22c55e', marginBottom: 16 }}>Profit saved: <strong>${calc.profit.toFixed(2)}</strong></div>
+        {syncStatus && <div style={{ marginBottom: 16 }}><SyncBadge status={syncStatus} /></div>}
+        <Btn onClick={reset}>New Allocation</Btn>
+      </Card>
+    </div>
+  );
+
+  // ── Checklist screen
+  if (step === 'checklist') return (
+    <div style={{ padding: 16, animation: 'fadeIn 0.3s ease' }}>
+      <Card style={{ marginBottom: 12, textAlign: 'center' }}>
+        <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>Income to Allocate</div>
+        <div style={{ fontSize: 32, fontWeight: 700 }}>${calc.income.toFixed(2)}</div>
+      </Card>
+      <div style={{ fontSize: 12, color: '#6b7280', textAlign: 'center', marginBottom: 12 }}>Transfer each amount to its account, then check it off ✓</div>
+      {previewItems.map(item => (
+        <Card key={item.key} style={{ marginBottom: 10, border: checked[item.key] ? '1px solid rgba(34,197,94,0.35)' : '1px solid rgba(255,255,255,0.06)', transition: 'border 0.2s' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontSize: 12, color: item.color, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>{item.label}</div>
+              <div style={{ fontSize: 26, fontWeight: 700, marginTop: 2 }}>${calc[item.key].toFixed(2)}</div>
+            </div>
+            <button
+              onClick={() => setChecked(p => ({ ...p, [item.key]: !p[item.key] }))}
+              style={{ width: 40, height: 40, borderRadius: '50%', border: `2px solid ${checked[item.key] ? '#22c55e' : 'rgba(255,255,255,0.15)'}`, background: checked[item.key] ? 'rgba(34,197,94,0.15)' : 'transparent', color: '#22c55e', fontSize: 20, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s' }}
+            >
+              {checked[item.key] ? '✓' : ''}
+            </button>
+          </div>
+        </Card>
+      ))}
+      <div style={{ marginTop: 8 }}>
+        <Btn onClick={finish} disabled={!allChecked} color='#22c55e'>
+          {allChecked ? '✓ Log Allocation' : `${previewItems.filter(i => checked[i.key]).length} of ${previewItems.length} transferred`}
+        </Btn>
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <Btn onClick={reset} color='#1f2937'>Start Over</Btn>
+      </div>
+    </div>
+  );
+
+  // ── Input screen
+  return (
+    <div style={{ padding: 16, animation: 'fadeIn 0.3s ease' }}>
+      <Card style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 16 }}>Enter Income to Allocate</div>
+        <Input label="Total in Income Account ($)" value={income} onChange={setIncome} type="number" placeholder="0.00" />
+        <Btn onClick={calculate} disabled={!amt || amt <= 0}>Calculate My Split →</Btn>
+      </Card>
+
+      {amt > 0 && (
+        <Card style={{ animation: 'fadeIn 0.2s ease' }}>
+          <SectionLabel text="Preview" />
+          {previewItems.map(item => (
+            <div key={item.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+              <span style={{ fontSize: 13 }}>{item.label}</span>
+              <span style={{ fontSize: 15, fontWeight: 700, color: item.color }}>${(amt * item.pct / 100).toFixed(2)}</span>
+            </div>
+          ))}
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ── Expenses ──────────────────────────────────────────────────────────────────
+function Expenses({ expenses, settings, onSave }) {
+  const [showForm, setShowForm] = useState(false);
+  const [syncStatus, setSyncStatus] = useState(null);
+  const [form, setForm] = useState({
+    date: new Date().toISOString().split('T')[0],
+    amount: '',
+    description: '',
+    category: QB_CATEGORIES[0],
+    account: 'OpEx',
+    photo: null
+  });
+  const photoRef = useRef();
+
+  const setField = (k, v) => setForm(p => ({ ...p, [k]: v }));
+
+  const handlePhoto = e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => setField('photo', ev.target.result);
+    reader.readAsDataURL(file);
+  };
+
+  const submit = async () => {
+    if (!form.amount || !form.description) return;
+    const record = { ...form, amount: parseFloat(form.amount), id: Date.now() };
+    setSyncStatus('syncing');
+    if (settings.scriptUrl) {
+      const res = await syncToSheets(settings.scriptUrl, 'Expenses', [
+        form.date, parseFloat(form.amount), form.description, form.category, form.account, form.photo ? 'Photo attached' : ''
+      ]);
+      setSyncStatus(res.ok ? 'synced' : 'error');
+    } else {
+      setSyncStatus(null);
+    }
+    onSave(record);
+    setShowForm(false);
+    setForm({ date: new Date().toISOString().split('T')[0], amount: '', description: '', category: QB_CATEGORIES[0], account: 'OpEx', photo: null });
+    setTimeout(() => setSyncStatus(null), 4000);
+  };
+
+  const recent = [...expenses].reverse().slice(0, 30);
+
+  return (
+    <div style={{ padding: 16, animation: 'fadeIn 0.3s ease' }}>
+      {syncStatus && <div style={{ marginBottom: 12, textAlign: 'center' }}><SyncBadge status={syncStatus} /></div>}
+
+      <Btn
+        onClick={() => setShowForm(p => !p)}
+        color={showForm ? '#374151' : '#3b82f6'}
+        style={{ marginBottom: 14 }}
+      >
+        {showForm ? '✕ Cancel' : '+ Add Expense'}
+      </Btn>
+
+      {showForm && (
+        <Card style={{ marginBottom: 14, animation: 'fadeIn 0.2s ease' }}>
+          <Input label="Date" value={form.date} onChange={v => setField('date', v)} type="date" />
+          <Input label="Amount ($)" value={form.amount} onChange={v => setField('amount', v)} type="number" placeholder="0.00" />
+          <Input label="Description" value={form.description} onChange={v => setField('description', v)} placeholder="What was this for?" />
+          <SelectField label="Category (QuickBooks)" value={form.category} onChange={v => setField('category', v)} options={QB_CATEGORIES} />
+          <SelectField label="Paid From Account" value={form.account} onChange={v => setField('account', v)} options={ACCOUNTS} />
+
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4, letterSpacing: 1, textTransform: 'uppercase' }}>Receipt Photo</div>
+            {form.photo ? (
+              <div style={{ position: 'relative' }}>
+                <img src={form.photo} alt="receipt" style={{ width: '100%', borderRadius: 8, maxHeight: 160, objectFit: 'cover' }} />
+                <button
+                  onClick={() => setField('photo', null)}
+                  style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(0,0,0,0.75)', border: 'none', color: '#fff', borderRadius: '50%', width: 26, height: 26, cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                >✕</button>
+              </div>
+            ) : (
+              <button
+                onClick={() => photoRef.current.click()}
+                style={{ width: '100%', padding: '13px', border: '2px dashed rgba(59,130,246,0.4)', background: 'rgba(59,130,246,0.05)', borderRadius: 9, color: '#60a5fa', fontSize: 13, cursor: 'pointer' }}
+              >📷 Attach Receipt</button>
+            )}
+            <input ref={photoRef} type="file" accept="image/*" capture="environment" onChange={handlePhoto} style={{ display: 'none' }} />
+          </div>
+
+          <Btn onClick={submit} disabled={!form.amount || !form.description} color='#22c55e'>Save Expense</Btn>
+        </Card>
+      )}
+
+      <Card>
+        <SectionLabel text="Recent Expenses" />
+        {recent.length === 0 ? (
+          <div style={{ fontSize: 13, color: '#6b7280', textAlign: 'center', padding: '16px 0' }}>No expenses yet</div>
+        ) : recent.map((e, i) => (
+          <div key={e.id} style={{ padding: '10px 0', borderBottom: i < recent.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div style={{ flex: 1, paddingRight: 8 }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{e.description}</div>
+                <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>{e.category} · {e.account} · {e.date}</div>
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#ef4444', whiteSpace: 'nowrap' }}>−${e.amount.toFixed(2)}</div>
+            </div>
+            {e.photo && (
+              <img src={e.photo} alt="receipt" style={{ marginTop: 7, width: '100%', borderRadius: 7, maxHeight: 90, objectFit: 'cover' }} />
+            )}
+          </div>
+        ))}
+      </Card>
+    </div>
+  );
+}
+
+// ── Reports ───────────────────────────────────────────────────────────────────
+function Reports({ allocations, expenses }) {
+  const now = new Date();
+  const [month, setMonth] = useState(now.getMonth());
+  const [year, setYear] = useState(now.getFullYear());
+
+  const inMonth = arr => arr.filter(x => {
+    const d = new Date(x.date);
+    return d.getMonth() === month && d.getFullYear() === year;
+  });
+
+  const mAllocs   = inMonth(allocations);
+  const mExpenses = inMonth(expenses);
+
+  const totalRevenue  = mAllocs.reduce((s, a) => s + a.income, 0);
+  const totalExpenses = mExpenses.reduce((s, e) => s + e.amount, 0);
+  const totalProfit   = mAllocs.reduce((s, a) => s + a.profit, 0);
+  const totalOwnerPay = mAllocs.reduce((s, a) => s + a.ownerPay, 0);
+  const totalTax      = mAllocs.reduce((s, a) => s + a.tax, 0);
+  const totalOpex     = mAllocs.reduce((s, a) => s + a.opex, 0);
+  const netProfit     = totalRevenue - totalExpenses;
+
+  const byCategory = QB_CATEGORIES.map(cat => ({
+    cat,
+    total: mExpenses.filter(e => e.category === cat).reduce((s, e) => s + e.amount, 0)
+  })).filter(x => x.total > 0);
+
+  const years = [2024, 2025, 2026, 2027, 2028];
+
+  return (
+    <div style={{ padding: 16, animation: 'fadeIn 0.3s ease' }}>
+
+      {/* Month/Year picker */}
+      <Card style={{ marginBottom: 14 }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <select value={month} onChange={e => setMonth(parseInt(e.target.value))}
+            style={{ flex: 1, background: '#111827', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 9, padding: '9px 12px', fontSize: 13, color: '#e2e8f0', outline: 'none' }}>
+            {MONTHS.map((m, i) => <option key={i} value={i}>{m}</option>)}
+          </select>
+          <select value={year} onChange={e => setYear(parseInt(e.target.value))}
+            style={{ width: 90, background: '#111827', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 9, padding: '9px 12px', fontSize: 13, color: '#e2e8f0', outline: 'none' }}>
+            {years.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+      </Card>
+
+      {/* Summary */}
+      <Card style={{ marginBottom: 14 }}>
+        <SectionLabel text={`Summary — ${MONTHS[month]} ${year}`} />
+        {[
+          { label: 'Total Revenue',   amount: totalRevenue,  color: '#22c55e' },
+          { label: 'Total Expenses',  amount: totalExpenses, color: '#ef4444' },
+          { label: 'Net Profit',      amount: netProfit,     color: netProfit >= 0 ? '#22c55e' : '#ef4444' },
+        ].map(item => (
+          <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+            <span style={{ fontSize: 13 }}>{item.label}</span>
+            <span style={{ fontSize: 15, fontWeight: 700, color: item.color }}>${item.amount.toFixed(2)}</span>
+          </div>
+        ))}
+      </Card>
+
+      {/* Allocations breakdown */}
+      <Card style={{ marginBottom: 14 }}>
+        <SectionLabel text="Allocations This Month" />
+        {[
+          { label: "Owner's Pay", amount: totalOwnerPay, color: '#3b82f6' },
+          { label: 'Tax Set Aside', amount: totalTax,    color: '#f59e0b' },
+          { label: 'Profit',       amount: totalProfit,  color: '#22c55e' },
+          { label: 'OpEx Budget',  amount: totalOpex,    color: '#8b5cf6' },
+        ].map(item => (
+          <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+            <span style={{ fontSize: 13 }}>{item.label}</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: item.color }}>${item.amount.toFixed(2)}</span>
+          </div>
+        ))}
+        {mAllocs.length === 0 && <div style={{ fontSize: 13, color: '#6b7280', textAlign: 'center', padding: '10px 0' }}>No allocations this month</div>}
+      </Card>
+
+      {/* Expenses by category */}
+      <Card>
+        <SectionLabel text="Expenses by Category" />
+        {byCategory.length === 0
+          ? <div style={{ fontSize: 13, color: '#6b7280', textAlign: 'center', padding: '10px 0' }}>No expenses this month</div>
+          : byCategory.map(({ cat, total }) => (
+            <div key={cat} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+              <span style={{ fontSize: 13 }}>{cat}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#ef4444' }}>−${total.toFixed(2)}</span>
+            </div>
+          ))
+        }
+      </Card>
+    </div>
+  );
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+function Settings({ settings, onSave }) {
+  const [form, setForm] = useState({ ...settings });
+  const [saved, setSaved] = useState(false);
+
+  const setField = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const total = [form.profit, form.ownerPay, form.tax, form.opex].reduce((s, v) => s + (parseFloat(v) || 0), 0);
+  const valid = Math.abs(total - 100) < 0.1;
+
+  const handleSave = () => {
+    onSave({ ...form, profit: parseFloat(form.profit), ownerPay: parseFloat(form.ownerPay), tax: parseFloat(form.tax), opex: parseFloat(form.opex) });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2500);
+  };
+
+  return (
+    <div style={{ padding: 16, animation: 'fadeIn 0.3s ease' }}>
+      <Card style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 16 }}>Allocation Percentages</div>
+        {[
+          { key: 'ownerPay', label: "Owner's Pay %" },
+          { key: 'tax',      label: 'Tax %' },
+          { key: 'profit',   label: 'Profit %' },
+          { key: 'opex',     label: 'OpEx %' },
+        ].map(f => (
+          <Input key={f.key} label={f.label} value={form[f.key]} onChange={v => setField(f.key, v)} type="number" />
+        ))}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 12px', background: valid ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)', borderRadius: 8, border: `1px solid ${valid ? 'rgba(34,197,94,0.25)' : 'rgba(239,68,68,0.25)'}`, marginBottom: 12 }}>
+          <span style={{ fontSize: 13, fontWeight: 700 }}>Total</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: valid ? '#22c55e' : '#ef4444' }}>{total.toFixed(1)}% {valid ? '✓' : '← must equal 100%'}</span>
+        </div>
+        <Btn onClick={handleSave} disabled={!valid} color='#3b82f6'>
+          {saved ? '✓ Saved!' : 'Save Percentages'}
+        </Btn>
+      </Card>
+
+      <Card>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Google Sheets Sync</div>
+        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 14, lineHeight: 1.7 }}>
+          Connect to Google Sheets so every allocation and expense syncs automatically. Paste your Google Apps Script URL below.
+        </div>
+        {settings.scriptUrl
+          ? <div style={{ fontSize: 12, color: '#22c55e', marginBottom: 10, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)', borderRadius: 8, padding: '8px 12px' }}>☁ Google Sheets connected</div>
+          : <div style={{ fontSize: 12, color: '#f59e0b', marginBottom: 10, background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: 8, padding: '8px 12px' }}>⚠ Not connected yet</div>
+        }
+        <Input label="Apps Script URL" value={form.scriptUrl} onChange={v => setField('scriptUrl', v)} placeholder="https://script.google.com/macros/s/..." />
+        <Btn onClick={handleSave} color='#22c55e'>{saved ? '✓ Saved!' : 'Save & Connect'}</Btn>
+      </Card>
+    </div>
+  );
+}
+
+// ── Tab Bar ───────────────────────────────────────────────────────────────────
+const TABS = [
+  { id: 'dashboard', label: 'Home',     icon: '🏠' },
+  { id: 'allocate',  label: 'Allocate', icon: '💸' },
+  { id: 'expenses',  label: 'Expenses', icon: '📋' },
+  { id: 'reports',   label: 'Reports',  icon: '📊' },
+  { id: 'settings',  label: 'Settings', icon: '⚙️' },
+];
+
+const TAB_TITLES = {
+  dashboard: { title: 'Desert Bloom', sub: 'Profit First' },
+  allocate:  { title: 'Allocate Income' },
+  expenses:  { title: 'Expenses' },
+  reports:   { title: 'Monthly Reports' },
+  settings:  { title: 'Settings' },
+};
+
+// ── App Root ──────────────────────────────────────────────────────────────────
+function App() {
+  const [tab, setTab]           = useState('dashboard');
+  const [settings, setSettings] = useState(() => load('pf_settings', DEFAULT_SETTINGS));
+  const [allocations, setAllocations] = useState(() => load('pf_allocations', []));
+  const [expenses, setExpenses] = useState(() => load('pf_expenses', []));
+
+  const saveSettings   = s => { setSettings(s);                             save('pf_settings',   s); };
+  const saveAllocation = a => { const n = [...allocations, a]; setAllocations(n); save('pf_allocations', n); };
+  const saveExpense    = e => { const n = [...expenses, e];    setExpenses(n);    save('pf_expenses',    n); };
+
+  const { title, sub } = TAB_TITLES[tab];
+
+  return (
+    <div style={{ maxWidth: 480, margin: '0 auto', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <Header title={title} sub={sub} />
+
+      <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 72 }}>
+        {tab === 'dashboard' && <Dashboard allocations={allocations} settings={settings} />}
+        {tab === 'allocate'  && <Allocate  settings={settings} onSave={saveAllocation} />}
+        {tab === 'expenses'  && <Expenses  expenses={expenses}  settings={settings} onSave={saveExpense} />}
+        {tab === 'reports'   && <Reports   allocations={allocations} expenses={expenses} />}
+        {tab === 'settings'  && <Settings  settings={settings} onSave={saveSettings} />}
+      </div>
+
+      {/* Tab Bar */}
+      <div style={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 480, background: '#080f1e', borderTop: '2px solid rgba(59,130,246,0.12)', display: 'flex', zIndex: 100 }}>
+        {TABS.map(t => (
+          <button
+            key={t.id} onClick={() => setTab(t.id)}
+            style={{ flex: 1, background: 'none', border: 'none', borderTop: tab === t.id ? '3px solid #3b82f6' : '3px solid transparent', cursor: 'pointer', padding: '9px 4px 7px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, transition: 'border 0.15s' }}
+          >
+            <span style={{ fontSize: 16 }}>{t.icon}</span>
+            <span style={{ fontSize: 9, fontWeight: 700, color: tab === t.id ? '#3b82f6' : '#475569' }}>{t.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

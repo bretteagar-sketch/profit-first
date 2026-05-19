@@ -39,6 +39,49 @@ function doPost(e) {
 }
 
 function doGet(e) {
+  const action = e.parameter.action;
+
+  // Return all data for cross-device sync
+  if (action === 'getData') {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const result = { allocations: [], expenses: [] };
+
+    // Load allocations
+    const allocSheet = ss.getSheetByName('Allocations');
+    if (allocSheet && allocSheet.getLastRow() > 1) {
+      const rows = allocSheet.getRange(2, 1, allocSheet.getLastRow() - 1, 6).getValues();
+      result.allocations = rows.map((row, i) => ({
+        id: i + 1,
+        date:     row[0] ? String(row[0]) : '',
+        income:   parseFloat(row[1]) || 0,
+        ownerPay: parseFloat(row[2]) || 0,
+        tax:      parseFloat(row[3]) || 0,
+        profit:   parseFloat(row[4]) || 0,
+        opex:     parseFloat(row[5]) || 0,
+      })).filter(r => r.income > 0);
+    }
+
+    // Load expenses
+    const expSheet = ss.getSheetByName('Expenses');
+    if (expSheet && expSheet.getLastRow() > 1) {
+      const rows = expSheet.getRange(2, 1, expSheet.getLastRow() - 1, 6).getValues();
+      result.expenses = rows.map((row, i) => ({
+        id:          i + 1,
+        date:        row[0] ? String(row[0]) : '',
+        amount:      parseFloat(row[1]) || 0,
+        description: row[2] ? String(row[2]) : '',
+        category:    row[3] ? String(row[3]) : '',
+        account:     row[4] ? String(row[4]) : '',
+        photo:       null,
+      })).filter(r => r.amount > 0);
+    }
+
+    return ContentService
+      .createTextOutput(JSON.stringify(result))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  // Default status check
   return ContentService
     .createTextOutput(JSON.stringify({ status: 'Desert Bloom Profit First connected ✓' }))
     .setMimeType(ContentService.MimeType.JSON);

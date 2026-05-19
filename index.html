@@ -725,6 +725,30 @@ function App() {
   const [settings, setSettings] = useState(() => load('pf_settings', DEFAULT_SETTINGS));
   const [allocations, setAllocations] = useState(() => load('pf_allocations', []));
   const [expenses, setExpenses] = useState(() => load('pf_expenses', []));
+  const [syncing, setSyncing]   = useState(false);
+  const [lastSync, setLastSync] = useState(null);
+
+  // Load data from Google Sheets on startup so all devices stay in sync
+  useEffect(() => {
+    const s = load('pf_settings', DEFAULT_SETTINGS);
+    if (!s.scriptUrl) return;
+    setSyncing(true);
+    fetch(`${s.scriptUrl}?action=getData`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.allocations && data.allocations.length > 0) {
+          setAllocations(data.allocations);
+          save('pf_allocations', data.allocations);
+        }
+        if (data.expenses && data.expenses.length > 0) {
+          setExpenses(data.expenses);
+          save('pf_expenses', data.expenses);
+        }
+        setLastSync(new Date().toLocaleTimeString());
+      })
+      .catch(() => {})
+      .finally(() => setSyncing(false));
+  }, []);
 
   const saveSettings      = s => { setSettings(s); save('pf_settings', s); };
   const saveAllocation    = a => { const n = [...allocations, a]; setAllocations(n); save('pf_allocations', n); };
@@ -736,7 +760,7 @@ function App() {
 
   return (
     <div style={{ maxWidth: 480, margin: '0 auto', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <Header title={title} sub={sub} />
+      <Header title={title} sub={syncing ? '⏳ Syncing data...' : lastSync ? `✓ Synced at ${lastSync}` : sub} />
 
       <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 72 }}>
         {tab === 'dashboard' && <Dashboard allocations={allocations} settings={settings} />}
